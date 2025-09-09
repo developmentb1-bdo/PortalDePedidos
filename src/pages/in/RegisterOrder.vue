@@ -754,6 +754,9 @@ export default {
                           ItemName: response.data.value[0].ItemName,
                           MeasureUnit: response.data.value[0].SalUnitMsr,
                           UnitPrice: response.data.value[0].Price,
+                          Quantity: item.Quantity,
+                          ShipDate: "",
+                          isLoadingItem: false,
                         };
                       } else {
                         errorsArray.push(item.ItemCode);
@@ -762,6 +765,9 @@ export default {
                           ItemName: null,
                           MeasureUnit: null,
                           UnitPrice: null,
+                          Quantity: "0",
+                          ShipDate: "",
+                          isLoadingItem: false,
                         };
                       }
                     })
