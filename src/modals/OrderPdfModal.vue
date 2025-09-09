@@ -660,7 +660,7 @@ const initialState = () => {
       {
         key: "ItemDescription",
         label: "Descrição do Item",
-        class: "text-center align-middle",
+        class: "text-start align-middle",
         thClass: "fs-10px",
         tdClass: "fs-10px",
       },

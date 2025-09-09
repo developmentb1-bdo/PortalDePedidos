@@ -63,7 +63,8 @@
     "vue2-daterange-picker": "^0.6.7",
     "vue2-google-maps": "^0.10.7",
     "vuejs-datepicker": "^1.6.2",
-    "vuex": "^3.6.2"
+    "vuex": "^3.6.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@vue/cli-plugin-babel": "^4.5.15",
