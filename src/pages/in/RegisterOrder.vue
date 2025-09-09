@@ -30,6 +30,7 @@
                 class="form-control"
                 id="dataEntrega"
                 v-model="data.DocDueDate"
+                @change="onChangeDocDueDate"
               />
             </div>
           </div>
@@ -90,9 +91,29 @@
       <panel title="Itens" noButton="true">
         <template slot="header">
           <h4 class="panel-title">Itens</h4>
-          <b-button size="sm" variant="dark" @click="addNewItem"
-            >Adicionar item</b-button
-          >
+          <div class="d-flex flex-row">
+            <label
+              class="btn btn-dark w-auto rounded h-30px me-2 d-flex align-items-center justify-content-center"
+            >
+              <input
+                id="importId"
+                type="file"
+                accept=".xls, .xlsx"
+                @change="onImportExcel"
+                :disabled="isLoadingImport"
+                true
+              />
+              <i
+                aria-hidden="true"
+                class="fa fa-file-excel text-success fa-fw fa-lg me-2"
+              ></i>
+              Importar Excel
+            </label>
+
+            <b-button size="sm" variant="dark" @click="addNewItem"
+              >Adicionar item</b-button
+            >
+          </div>
         </template>
 
         <fieldset class="row" :disabled="isLoading">
@@ -104,7 +125,15 @@
               :items="data.DocumentLines"
               :fields="itensFields"
               show-empty
+              :busy="isLoadingImport"
+              true
             >
+              <template #table-busy>
+                <div class="text-center text-reverse my-2">
+                  <b-spinner class="align-middle" small></b-spinner>
+                  <strong> Carregando dados...</strong>
+                </div>
+              </template>
               <template #empty>
                 <h6
                   class="d-flex justify-content-center align-items-center mt-2"
@@ -169,7 +198,6 @@
               </template>
               <template #cell(totalPrice)="row">
                 <money
-                  id="totalItem"
                   :value="
                     data.DocumentLines[row.index].Quantity *
                     data.DocumentLines[row.index].UnitPrice
@@ -209,7 +237,7 @@
 
               <template #cell(excluir)="row">
                 <button
-                  v-on:click="removeItem(row)"
+                  v-on:click="removeItem(row.index)"
                   :disabled="isLoading"
                   type="button"
                   class="btn btn-outline-dark"
@@ -257,7 +285,7 @@
             data-toggle="buttons"
           >
             <div class="flex-row">
-              <label class="btn btn-dark h-35px w-auto rounded">
+              <label class="btn btn-dark h-30px w-auto rounded">
                 <input
                   id="attachedId"
                   type="file"
@@ -337,6 +365,8 @@ import { Money } from "v-money";
 import { v4 as uuidv4 } from "uuid";
 import { S3 } from "@/config/AWSS3";
 
+import * as XLSX from "xlsx";
+
 //MODALS
 import ItensModal from "@/modals/ItensModal.vue";
 
@@ -374,6 +404,7 @@ export default {
     return {
       isLoading: false,
       isLoadingFile: false,
+      isLoadingImport: false,
       isLoadingDocumentStatusCodeOnBlur: false,
       maxObsLength: 240,
       currentItemIndex: null,
@@ -496,7 +527,11 @@ export default {
       }
     },
     addNewItem() {
-      this.data.DocumentLines.push(ITEM());
+      const item = ITEM();
+      if (this.data.DocDueDate) {
+        item.ShipDate = this.data.DocDueDate;
+      }
+      this.data.DocumentLines.push(item);
     },
     removeItem(index) {
       this.data.DocumentLines.splice(index, 1);
@@ -515,6 +550,30 @@ export default {
         .reverse()
         .join("-");
     },
+    onChangeDocDueDate(event) {
+      const date = event.target.value;
+
+      if (this.data.DocumentLines.length > 0) {
+        this.$swal({
+          title: "Notificação",
+          text: "Deseja alterar também a data de entrega dos itens adicionados?",
+          type: "warning",
+          showCancelButton: true,
+          buttonsStyling: false,
+          confirmButtonText: "Alterar",
+          cancelButtonText: "Não alterar",
+          confirmButtonClass: "btn me-5px btn-" + "dark" + "",
+          cancelButtonClass: "btn btn-danger",
+        }).then((res) => {
+          if (res.isConfirmed) {
+            this.data.DocumentLines.map((item) => {
+              item.ShipDate = date;
+              return item;
+            });
+          }
+        });
+      }
+    },
     findItems(index) {
       this.currentItemIndex = index;
       this.$bvModal.show("ItensModal");
@@ -525,6 +584,7 @@ export default {
         this.data.DocumentLines[row.index].ItemName = "";
         this.data.DocumentLines[row.index].MeasureUnit = "";
         this.data.DocumentLines[row.index].UnitPrice = "0";
+        this.data.DocumentLines[row.index].Quantity = "0";
         this.data.DocumentLines[row.index].isLoadingItem = false;
         return;
       }
@@ -532,6 +592,7 @@ export default {
         this.data.DocumentLines[row.index].ItemName = "";
         this.data.DocumentLines[row.index].MeasureUnit = "";
         this.data.DocumentLines[row.index].UnitPrice = "0";
+        this.data.DocumentLines[row.index].Quantity = "0";
         this.data.DocumentLines[row.index].isLoadingItem = true;
         const { data } = await api.get(
           `portalPedido/getFilterItemCodeSales?priceList=${this.$store.state.auth.user.ListNum}&itemCode=${row.value}`
@@ -543,11 +604,18 @@ export default {
           this.data.DocumentLines[row.index].MeasureUnit =
             data.value[0].SalUnitMsr;
           this.data.DocumentLines[row.index].UnitPrice = data.value[0].Price;
+
+          if (
+            this.data.DocumentLines[this.data.DocumentLines.length - 1].ItemCode
+          ) {
+            this.addNewItem();
+          }
         } else {
           this.data.DocumentLines[row.index].ItemCode = "";
           this.data.DocumentLines[row.index].ItemName = "";
           this.data.DocumentLines[row.index].MeasureUnit = "";
           this.data.DocumentLines[row.index].UnitPrice = "0";
+          this.data.DocumentLines[row.index].Quantity = "0";
         }
       } catch (error) {
         if (!error.canceled) {
@@ -557,12 +625,14 @@ export default {
         this.data.DocumentLines[row.index].ItemName = "";
         this.data.DocumentLines[row.index].MeasureUnit = "";
         this.data.DocumentLines[row.index].UnitPrice = "0";
+        this.data.DocumentLines[row.index].Quantity = "0";
       } finally {
         this.data.DocumentLines[row.index].isLoadingItem = false;
       }
     },
     async itemKeyUp() {},
     addSelectedItem(item) {
+      this.data.DocumentLines[this.currentItemIndex].Quantity = "0";
       this.data.DocumentLines[this.currentItemIndex].ItemCode = item.ItemCode;
       this.data.DocumentLines[this.currentItemIndex].ItemName = item.ItemName;
       this.data.DocumentLines[this.currentItemIndex].UnitPrice = item.Price;
@@ -570,6 +640,12 @@ export default {
         item.SalUnitMsr;
 
       this.currentItemIndex = null;
+
+      if (
+        this.data.DocumentLines[this.data.DocumentLines.length - 1].ItemCode
+      ) {
+        this.addNewItem();
+      }
     },
     findDocumentStatus() {
       this.$bvModal.show("StatusDocumentModal");
@@ -609,6 +685,134 @@ export default {
       this.data.U_nomeStatus = status.Name;
       this.data.U_StatusDoc = status.Code;
     },
+    async onImportExcel(event) {
+      if (event.target.files.length > 0) {
+        for (let file of event.target.files) {
+          try {
+            let extensao = file.name.split(".").pop();
+
+            if (extensao == "xls" || extensao == "xlsx") {
+              const res = await this.$swal({
+                title: "Notificação",
+                text: "Esse processo pode levar alguns minutos. Deseja continuar?",
+                type: "warning",
+                showCancelButton: true,
+                buttonsStyling: false,
+                confirmButtonText: "Continuar",
+                cancelButtonText: "Cancelar",
+                confirmButtonClass: "btn me-5px btn-" + "dark" + "",
+                cancelButtonClass: "btn btn-danger",
+              });
+              if (!res.isConfirmed) return;
+
+              try {
+                this.isLoadingImport = true;
+                const reader = new FileReader();
+
+                const fileBuffer = await new Promise((resolve, reject) => {
+                  reader.onload = (e) => resolve(e.target.result);
+                  reader.onerror = (e) => reject(e);
+                  reader.readAsArrayBuffer(file);
+                });
+
+                const data = new Uint8Array(fileBuffer);
+                const workbook = XLSX.read(data, { type: "array" });
+
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+                  header: 1,
+                });
+
+                const mappedData = jsonData
+                  .slice(1)
+                  .filter(
+                    (row) =>
+                      row &&
+                      row.length &&
+                      row.some(
+                        (cell) =>
+                          cell !== undefined && cell !== null && cell !== ""
+                      )
+                  )
+                  .map((row) => ({
+                    ItemCode: row[0],
+                    Quantity: row[1],
+                  }));
+
+                const errorsArray = [];
+
+                const apiCalls = mappedData.map((item) =>
+                  api
+                    .get(
+                      `portalPedido/getFilterItemCodeSales?priceList=${this.$store.state.auth.user.ListNum}&itemCode=${item.ItemCode}`
+                    )
+                    .then((response) => {
+                      if (response.data.value.length > 0) {
+                        return {
+                          ItemCode: response.data.value[0].ItemCode,
+                          ItemName: response.data.value[0].ItemName,
+                          MeasureUnit: response.data.value[0].SalUnitMsr,
+                          UnitPrice: response.data.value[0].Price,
+                        };
+                      } else {
+                        errorsArray.push(item.ItemCode);
+                        return {
+                          ItemCode: null,
+                          ItemName: null,
+                          MeasureUnit: null,
+                          UnitPrice: null,
+                        };
+                      }
+                    })
+                );
+
+                const ITEMS_DATA = await Promise.all(apiCalls);
+
+                if (this.data.DocDueDate) {
+                  ITEMS_DATA.map((item) => {
+                    item.ShipDate = this.data.DocDueDate;
+                    return item;
+                  });
+                }
+
+                this.data.DocumentLines = [
+                  ...this.data.DocumentLines,
+                  ...ITEMS_DATA.filter((item) => item.ItemCode),
+                ];
+
+                if (errorsArray.length > 0) {
+                  this.alert(
+                    `Os seguintes itens não foram encontrados: ${errorsArray}`
+                  );
+                }
+              } catch (error) {
+                this.alert(
+                  error.message ||
+                    "Erro ao importar dados dos itens. Tente novamente ou entre em contato com o suporte."
+                );
+              } finally {
+                this.isLoadingImport = false;
+              }
+            } else {
+              this.alert("Insira um arquivo válido. (xls ou xlsx)");
+              document.getElementById("importId").value = "";
+              event.target.value = "";
+              return;
+            }
+          } catch (error) {
+            this.alert(
+              error.message ||
+                "Erro ao importar dados dos itens. Tente novamente ou entre em contato com o suporte."
+            );
+          } finally {
+            this.isLoadingImport = false;
+          }
+        }
+      }
+      document.getElementById("importId").value = "";
+      event.target.value = "";
+    },
     async onChangeFile(file) {
       if (file.target.files.length > 0) {
         for (let file of file.target.files) {
@@ -626,10 +830,10 @@ export default {
               extensao,
               u_maimeType,
             });
-          } catch (err) {
-            this.dialogMsg =
-              "Falha ao converter anexo(s). Tente Novamente ou entre em contato com o administrador.";
-            this.$bvModal.show("modalDialog");
+          } catch (error) {
+            this.alert(
+              "Falha ao converter anexo(s). Tente Novamente ou entre em contato com o administrador."
+            );
           } finally {
             this.isLoadingFile = false;
           }
@@ -664,7 +868,7 @@ export default {
               MeasureUnit: item.MeasureUnit,
               UnitPrice: item.UnitPrice,
             };
-          }),
+          }).filter((item) => item.ItemCode),
         };
 
         //CADASTRO COM ANEXO
@@ -711,7 +915,8 @@ export default {
 </script>
 
 <style>
-#attachedId {
+#attachedId,
+#importId {
   display: none;
 }
 </style>
